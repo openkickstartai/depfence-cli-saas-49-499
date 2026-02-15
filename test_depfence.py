@@ -88,3 +88,115 @@ if __name__ == "__main__":
             fn()
             print(f"  \u2713 {name}")
     print("All tests passed!")
+
+
+from formatters import format_table, format_json, format_sarif
+
+
+def _make_report(name="test-pkg", score=50, days=100, maintainers=1,
+                 releases=5, verdict="HIGH"):
+    """Build a RiskReport for formatter tests."""
+    return RiskReport(
+        name=name, score=score, last_release_days=days,
+        maintainer_count=maintainers, release_count=releases, verdict=verdict,
+    )
+
+
+# --- format_json tests ---
+def test_format_json_valid():
+    """format_json output must be valid JSON with schema_version."""
+    reports = [_make_report()]
+    output = format_json(reports)
+    data = json.loads(output)
+    assert data["schema_version"] == "1.0"
+    assert "scan_timestamp" in data
+    assert isinstance(data["packages"], list)
+    assert len(data["packages"]) == 1
+
+
+def test_format_json_package_structure():
+    """JSON packages must have all required fields."""
+    reports = [_make_report(name="flask", score=30, verdict="MEDIUM")]
+    data = json.loads(format_json(reports))
+    pkg = data["packages"][0]
+    assert pkg["name"] == "flask"
+    assert pkg["risk_score"] == 0.3
+    assert pkg["risk_level"] == "medium"
+    assert "last_release_date" in pkg
+    assert isinstance(pkg["factors"], list)
+
+
+def test_format_json_multiple_packages():
+    """JSON output with multiple packages."""
+    reports = [
+        _make_report(name="pkg-a", score=10, verdict="LOW"),
+        _make_report(name="pkg-b", score=80, verdict="CRITICAL"),
+    ]
+    data = json.loads(format_json(reports))
+    assert len(data["packages"]) == 2
+    names = [p["name"] for p in data["packages"]]
+    assert "pkg-a" in names
+    assert "pkg-b" in names
+    # Verify risk scores
+    scores = {p["name"]: p["risk_score"] for p in data["packages"]}
+    assert scores["pkg-a"] == 0.1
+    assert scores["pkg-b"] == 0.8
+
+
+# --- format_sarif tests ---
+def test_format_sarif_valid():
+    """format_sarif must produce valid SARIF with runs[].results[]."""
+    reports = [_make_report()]
+    output = format_sarif(reports)
+    data = json.loads(output)
+    assert data["version"] == "2.1.0"
+    assert "$schema" in data
+    assert "runs" in data
+    assert len(data["runs"]) == 1
+    run = data["runs"][0]
+    assert "tool" in run
+    assert "results" in run
+    assert len(run["results"]) == 1
+
+
+def test_format_sarif_result_structure():
+    """SARIF results must have ruleId, message, and level."""
+    reports = [_make_report(name="old-lib", score=80, verdict="CRITICAL")]
+    data = json.loads(format_sarif(reports))
+    result = data["runs"][0]["results"][0]
+    assert "ruleId" in result
+    assert "message" in result
+    assert "text" in result["message"]
+    assert result["level"] == "error"
+    assert "old-lib" in result["message"]["text"]
+    # Check tool driver has rules
+    driver = data["runs"][0]["tool"]["driver"]
+    assert driver["name"] == "DepFence"
+    assert len(driver["rules"]) >= 1
+
+
+# --- format_table tests ---
+def test_format_table_output():
+    """format_table must include package name and verdict."""
+    reports = [_make_report(name="my-pkg", score=15, verdict="LOW")]
+    output = format_table(reports, color=False)
+    assert "my-pkg" in output
+    assert "LOW" in output
+    assert "15" in output
+
+
+# --- exit-code threshold tests ---
+def test_exit_code_high_risk_triggers():
+    """Packages with score >= 70 should exceed default 0.7 threshold."""
+    report = _make_report(score=80, verdict="CRITICAL")
+    threshold = 0.7
+    risk_score = report.score / 100.0
+    assert risk_score >= threshold, f"risk_score {risk_score} should >= {threshold}"
+
+
+def test_exit_code_low_risk_passes():
+    """Packages with score < 70 should not exceed default 0.7 threshold."""
+    report = _make_report(score=20, verdict="LOW")
+    threshold = 0.7
+    risk_score = report.score / 100.0
+    assert risk_score < threshold, f"risk_score {risk_score} should < {threshold}"

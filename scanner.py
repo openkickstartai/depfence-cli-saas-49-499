@@ -3,11 +3,11 @@ import json
 import re
 import requests
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
 from typing import List, Optional, Callable
 
 SAFE_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
-
 
 @dataclass
 class RiskReport:
@@ -16,6 +16,10 @@ class RiskReport:
     last_release_days: int
     maintainer_count: int
     release_count: int
+    verdict: str
+    last_release_date: str = ""
+    factors: list = field(default_factory=list)
+
     verdict: str
 
 
